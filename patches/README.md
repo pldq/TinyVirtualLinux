@@ -39,6 +39,11 @@
 
 ```powershell
 git submodule update --init qemu
+
+# 补丁使用 LF 换行；若 QEMU 工作树被 CRLF 检出，先切换后再应用
+git -C qemu config core.autocrlf false
+git -C qemu rm -r --cached . ; git -C qemu reset --hard
+
 git -C qemu apply --check ..\patches\qemu-v11.1.3-windows-9p.patch
 git -C qemu apply ..\patches\qemu-v11.1.3-windows-9p.patch
 ```
@@ -52,6 +57,17 @@ mkdir -p build && cd build
   --disable-sdl --disable-gtk --disable-opengl --disable-docs
 make -j"$(nproc)"
 ```
+
+## CI 构建
+
+[`../.github/workflows/build-qemu-9p.yml`](../.github/workflows/build-qemu-9p.yml) 提供 Windows 构建流水线：
+
+- **手动触发**：Actions → *Build QEMU with virtio-9p for Windows* → *Run workflow*。可选填 QEMU tag，留空则使用 `.gitmodules` 中 `branch` 记录的 tag（当前 `v11.1.3`）。
+- **打 tag 触发**：推送 `qemu-v*` tag 时构建，并自动创建 GitHub Release 附加 zip。
+- 产物：名为 `qemu-9p-windows-x86_64` 的 artifact（zip），保留 30 天。
+
+工作流会浅克隆对应 QEMU tag、应用 `patches/*.patch`、用 MSYS2 UCRT64 构建
+`x86_64-softmmu`（WHPX + virtfs + slirp），并打包 exe、运行时 DLL 与固件。
 
 ## 使用
 
