@@ -215,17 +215,20 @@ jobs:
           fi
           echo "==> DLL search path: $dll_dir"
 
-          collect() {
+          # Walk the import table of $1 and copy every mingw-provided
+          # dependency it references (recursively). The exe itself is copied
+          # by the caller, so this only handles dependencies.
+          collect_deps() {
             local f="$1"
-            local b
-            b="$(basename "$f")"
-            [ -f "/c/qemu-pkg/$b" ] && return
-            cp -n "$f" /c/qemu-pkg/ || { echo "WARN: cannot copy $f"; return; }
             local d src
             for d in $(objdump -p "$f" 2>/dev/null | awk '/DLL Name:/ {print $3}'); do
               src="$dll_dir/$d"
               [ -f "$src" ] || continue
-              collect "$src"
+              if [ -f "/c/qemu-pkg/$d" ]; then
+                continue
+              fi
+              cp -n "$src" /c/qemu-pkg/ || { echo "WARN: cannot copy $src"; continue; }
+              collect_deps "$src"
             done
           }
 
@@ -233,9 +236,9 @@ jobs:
             [ -f "$exe" ] || continue
             cp -n "$exe" /c/qemu-pkg/
             strip --strip-unneeded /c/qemu-pkg/"$(basename "$exe")" 2>/dev/null || true
-            collect /c/qemu-pkg/"$(basename "$exe")"
+            collect_deps "$exe"
           done
-          echo "==> collected $(ls /c/qemu-pkg/*.dll 2>/dev/null | wc -l) DLLs"
+          echo "==> collected $(ls /c/qemu-pkg/*.dll 2>/dev/null | wc -l) DLLs from $dll_dir"
 
           # Firmware, keymaps, DTB and edk2 descriptors (flat share/ layout)
           cp -rn /c/qemu-install/share/. /c/qemu-pkg/share/
