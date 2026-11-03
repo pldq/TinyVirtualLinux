@@ -62,12 +62,15 @@ make -j"$(nproc)"
 
 [`../.github/workflows/build-qemu-9p.yml`](../.github/workflows/build-qemu-9p.yml) 提供 Windows 构建流水线：
 
-- **手动触发**：Actions → *Build QEMU with virtio-9p for Windows* → *Run workflow*。可选填 QEMU tag，留空则使用 `.gitmodules` 中 `branch` 记录的 tag（当前 `v11.1.3`）。
+- **手动触发**：Actions → *Build QEMU with virtio-9p for Windows* → *Run workflow*。QEMU 版本固定取自 `.gitmodules` 的 `branch`（当前 `v11.1.3`），无需手动指定；可选参数：
+  - `targets`：QEMU target 列表，逗号分隔（默认 `x86_64-softmmu`）；
+  - `configure_args`：追加到默认参数之后的额外 `./configure` 选项；
+  - `jobs`：`make -j` 并行度（留空用 CPU 数）。
 - **打 tag 触发**：推送 `qemu-v*` tag 时构建，并自动创建 GitHub Release 附加 zip。
 - 产物：名为 `qemu-9p-windows-x86_64` 的 artifact（zip），保留 30 天。
 
-工作流会浅克隆对应 QEMU tag、应用 `patches/*.patch`、用 MSYS2 UCRT64 构建
-`x86_64-softmmu`（WHPX + virtfs + slirp），并打包 exe、运行时 DLL 与固件。
+工作流会浅克隆 `.gitmodules` 指定的 QEMU tag、应用 `patches/*.patch`、用 MSYS2 UCRT64
+构建（WHPX + virtfs + slirp），并打包 `bin/*.exe`、运行时 DLL 与固件。
 
 ## 使用
 

@@ -3,9 +3,20 @@ name: Build QEMU with virtio-9p for Windows
 on:
   workflow_dispatch:
     inputs:
-      qemu_tag:
-        description: "QEMU release tag to build (leave empty to use the tag pinned in .gitmodules)"
+      targets:
+        description: "QEMU target list (comma separated)"
         required: false
+        default: "x86_64-softmmu"
+        type: string
+      configure_args:
+        description: "Extra ./configure arguments (appended after the defaults)"
+        required: false
+        default: ""
+        type: string
+      jobs:
+        description: "Parallel make jobs (empty = number of CPUs)"
+        required: false
+        default: ""
         type: string
   push:
     tags:
@@ -23,6 +34,9 @@ env:
   STAGE: C:\qemu-stage
   PKG: C:\qemu-pkg
   ARTIFACT: qemu-9p-windows-x86_64.zip
+  TARGETS: ${{ github.event.inputs.targets }}
+  CONFIGURE_ARGS: ${{ github.event.inputs.configure_args }}
+  JOBS: ${{ github.event.inputs.jobs }}
 
 jobs:
   build:
@@ -40,23 +54,25 @@ jobs:
         with:
           submodules: false
 
-      - name: Resolve QEMU tag and clone source
+      - name: Clone QEMU at the tag pinned in .gitmodules
         shell: pwsh
         run: |
-          $tag = '${{ github.event.inputs.qemu_tag }}'.Trim()
-          if (-not $tag) {
-            $match = Select-String -Path .gitmodules -Pattern '^\s*branch\s*=\s*(.+)$'
-            if (-not $match) { throw "no QEMU tag given and no branch entry in .gitmodules" }
-            $tag = $match.Matches[0].Groups[1].Value.Trim()
-          }
+          $match = Select-String -Path .gitmodules -Pattern '^\s*branch\s*=\s*(.+)$'
+          if (-not $match) { throw "no branch (QEMU release tag) entry in .gitmodules" }
+          $tag = $match.Matches[0].Groups[1].Value.Trim()
           Write-Host "==> Building QEMU tag: $tag"
-          "QEMU_TAG=$tag" | Out-File -FilePath $env:GITHUB_ENV -Append -Encoding utf8
 
           if (Test-Path qemu) { Remove-Item qemu -Recurse -Force }
           git clone --depth 1 --branch $tag $env:QEMU_REPO qemu
           if ($LASTEXITCODE -ne 0) { throw "failed to clone $env:QEMU_REPO at $tag" }
-          git -C qemu describe --tags --always
-          git -C qemu rev-parse HEAD
+          $head = (git -C qemu rev-parse HEAD).Trim()
+          Write-Host "==> HEAD: $head ($(git -C qemu describe --tags --always))"
+
+          # The gitlink recorded in the outer repo should match the tag commit.
+          $gitlink = ((git ls-tree HEAD qemu) -split '\s+')[2]
+          if ($gitlink -and $gitlink -ne $head) {
+            Write-Warning "submodule gitlink $gitlink differs from tag commit $head"
+          }
 
       - name: Apply Windows 9P patches
         shell: pwsh
@@ -89,16 +105,19 @@ jobs:
             mingw-w64-ucrt-x86_64-ninja
             mingw-w64-ucrt-x86_64-pkgconf
 
-      - name: Configure QEMU (x86_64-softmmu, virtfs/9P, WHPX, slirp)
+      - name: Configure QEMU (virtfs/9P, WHPX, slirp)
         shell: msys2 {0}
         run: |
           set -euo pipefail
           src="$(cygpath -u "$GITHUB_WORKSPACE")/qemu"
+          targets="${TARGETS:-x86_64-softmmu}"
+          echo "==> target list: $targets"
+          echo "==> extra configure args: ${CONFIGURE_ARGS:-<none>}"
           rm -rf /c/qemu-build
           mkdir -p /c/qemu-build
           cd /c/qemu-build
           "$src/configure" \
-            --target-list=x86_64-softmmu \
+            --target-list="$targets" \
             --prefix=/ \
             --enable-virtfs \
             --enable-whpx \
@@ -109,15 +128,15 @@ jobs:
             --disable-virglrenderer \
             --disable-modules \
             --disable-docs \
-            --disable-plugins
+            --disable-plugins \
+            ${CONFIGURE_ARGS:-}
 
       - name: Build QEMU
         shell: msys2 {0}
         run: |
           set -euo pipefail
           cd /c/qemu-build
-          make -j"$(nproc)"
-          ls -la qemu-system-x86_64.exe
+          make -j"${JOBS:-$(nproc)}"
 
       - name: Install and assemble portable package
         shell: msys2 {0}
@@ -128,7 +147,6 @@ jobs:
           make install DESTDIR=/c/qemu-stage
 
           mkdir -p /c/qemu-pkg/share
-          cp -n /c/qemu-stage/bin/qemu-system-x86_64.exe /c/qemu-pkg/
 
           # Collect the mingw runtime DLLs transitively (only those under /ucrt64/bin)
           collect() {
@@ -143,7 +161,12 @@ jobs:
               collect "$d"
             done
           }
-          collect /c/qemu-pkg/qemu-system-x86_64.exe
+
+          for exe in /c/qemu-stage/bin/*.exe; do
+            [ -f "$exe" ] || continue
+            cp -n "$exe" /c/qemu-pkg/
+            collect /c/qemu-pkg/"$(basename "$exe")"
+          done
 
           # Firmware and keymaps installed by `make install`
           cp -rn /c/qemu-stage/share/qemu/. /c/qemu-pkg/share/
