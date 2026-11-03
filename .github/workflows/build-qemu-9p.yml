@@ -118,7 +118,7 @@ jobs:
           cd /c/qemu-build
           "$src/configure" \
             --target-list="$targets" \
-            --prefix=/ \
+            --prefix=C:/qemu-install \
             --enable-virtfs \
             --enable-whpx \
             --enable-slirp \
@@ -143,10 +143,18 @@ jobs:
         run: |
           set -euo pipefail
           cd /c/qemu-build
-          rm -rf /c/qemu-stage /c/qemu-pkg
-          make install DESTDIR=/c/qemu-stage
-
+          rm -rf /c/qemu-install /c/qemu-pkg
           mkdir -p /c/qemu-pkg/share
+
+          # --prefix=C:/qemu-install keeps the Windows path intact (a POSIX
+          # prefix such as "/" is translated by MSYS2 into the MSYS root).
+          make install
+
+          if [ ! -d /c/qemu-install/share/qemu ]; then
+            echo "ERROR: install prefix was not populated as expected"
+            ls -la /c/qemu-install 2>/dev/null || true
+            exit 1
+          fi
 
           # Collect the mingw runtime DLLs transitively (only those under /ucrt64/bin)
           collect() {
@@ -162,19 +170,20 @@ jobs:
             done
           }
 
-          for exe in /c/qemu-stage/bin/*.exe; do
+          for exe in /c/qemu-install/bin/*.exe; do
             [ -f "$exe" ] || continue
             cp -n "$exe" /c/qemu-pkg/
             collect /c/qemu-pkg/"$(basename "$exe")"
           done
 
-          # Firmware and keymaps installed by `make install`
-          cp -rn /c/qemu-stage/share/qemu/. /c/qemu-pkg/share/
+          # Firmware, keymaps and DTB files, at the layout QEMU relocates to
+          # (exe_dir/share/qemu) at runtime.
+          cp -rn /c/qemu-install/share/qemu /c/qemu-pkg/share/
 
           echo "==> package contents"
           ls -la /c/qemu-pkg
           echo "dll count: $(ls /c/qemu-pkg/*.dll 2>/dev/null | wc -l)"
-          test -f /c/qemu-pkg/share/bios-256k.bin && echo "firmware OK" || echo "WARN: no bios-256k.bin"
+          test -f /c/qemu-pkg/share/qemu/bios-256k.bin && echo "firmware OK" || echo "WARN: no bios-256k.bin"
 
       - name: Package ZIP
         shell: pwsh
