@@ -199,9 +199,17 @@ jobs:
           fi
 
           # Collect the mingw runtime DLLs transitively by reading each PE
-          # import table directly. ldd output is locale/path dependent and
+          # import table directly, mirroring QEMU's own installer helper
+          # (scripts/nsis.py): objdump -p -> "DLL Name:", resolve against the
+          # glib bindir, recurse. ldd output is locale/path dependent and
           # silently reports "not found", which used to drop dependencies
           # such as libbz2-1.dll from the package.
+          dll_dir="$(pkg-config --variable=bindir glib-2.0 2>/dev/null || true)"
+          if [ ! -d "$dll_dir" ]; then
+            dll_dir="/ucrt64/bin"
+          fi
+          echo "==> DLL search path: $dll_dir"
+
           collect() {
             local f="$1"
             local b
@@ -210,7 +218,7 @@ jobs:
             cp -n "$f" /c/qemu-pkg/ 2>/dev/null || return
             local d src
             for d in $(objdump -p "$f" 2>/dev/null | awk '/DLL Name:/ {print $3}'); do
-              src="/ucrt64/bin/$d"
+              src="$dll_dir/$d"
               [ -f "$src" ] || continue
               collect "$src"
             done
@@ -231,7 +239,7 @@ jobs:
           for exe in /c/qemu-pkg/*.exe; do
             [ -f "$exe" ] || continue
             for d in $(objdump -p "$exe" 2>/dev/null | awk '/DLL Name:/ {print $3}'); do
-              if [ -f "/ucrt64/bin/$d" ] && [ ! -f "/c/qemu-pkg/$d" ]; then
+              if [ -f "$dll_dir/$d" ] && [ ! -f "/c/qemu-pkg/$d" ]; then
                 echo "MISSING dependency: $d (needed by $(basename "$exe"))"
                 missing=1
               fi
