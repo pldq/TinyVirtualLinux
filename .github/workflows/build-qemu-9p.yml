@@ -198,17 +198,21 @@ jobs:
             exit 1
           fi
 
-          # Collect the mingw runtime DLLs transitively (only those under /ucrt64/bin)
+          # Collect the mingw runtime DLLs transitively by reading each PE
+          # import table directly. ldd output is locale/path dependent and
+          # silently reports "not found", which used to drop dependencies
+          # such as libbz2-1.dll from the package.
           collect() {
             local f="$1"
             local b
             b="$(basename "$f")"
             [ -f "/c/qemu-pkg/$b" ] && return
             cp -n "$f" /c/qemu-pkg/ 2>/dev/null || return
-            for d in $(ldd "$f" 2>/dev/null \
-                       | grep -iE '/ucrt64/bin/[^ ]+\.dll' \
-                       | sed -E 's#.*(/ucrt64/bin/[^ ]+\.dll).*#\1#'); do
-              collect "$d"
+            local d src
+            for d in $(objdump -p "$f" 2>/dev/null | awk '/DLL Name:/ {print $3}'); do
+              src="/ucrt64/bin/$d"
+              [ -f "$src" ] || continue
+              collect "$src"
             done
           }
 
@@ -221,6 +225,22 @@ jobs:
 
           # Firmware, keymaps, DTB and edk2 descriptors (flat share/ layout)
           cp -rn /c/qemu-install/share/. /c/qemu-pkg/share/
+
+          # Fail early if any mingw-provided dependency is still missing.
+          missing=0
+          for exe in /c/qemu-pkg/*.exe; do
+            [ -f "$exe" ] || continue
+            for d in $(objdump -p "$exe" 2>/dev/null | awk '/DLL Name:/ {print $3}'); do
+              if [ -f "/ucrt64/bin/$d" ] && [ ! -f "/c/qemu-pkg/$d" ]; then
+                echo "MISSING dependency: $d (needed by $(basename "$exe"))"
+                missing=1
+              fi
+            done
+          done
+          if [ "$missing" -ne 0 ]; then
+            echo "ERROR: package is missing runtime DLLs"
+            exit 1
+          fi
 
           echo "==> package contents"
           ls -la /c/qemu-pkg
