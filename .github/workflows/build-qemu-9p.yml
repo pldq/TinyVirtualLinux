@@ -205,6 +205,11 @@ jobs:
           # silently reports "not found", which used to drop dependencies
           # such as libbz2-1.dll from the package.
           dll_dir="$(pkg-config --variable=bindir glib-2.0 2>/dev/null || true)"
+          if [ -n "$dll_dir" ]; then
+            # pkg-config returns a native Windows path (D:/...); convert it so
+            # cp/objdump in this shell all agree on the same location.
+            dll_dir="$(cygpath -u "$dll_dir" 2>/dev/null || printf '%s' "$dll_dir")"
+          fi
           if [ ! -d "$dll_dir" ]; then
             dll_dir="/ucrt64/bin"
           fi
@@ -215,7 +220,7 @@ jobs:
             local b
             b="$(basename "$f")"
             [ -f "/c/qemu-pkg/$b" ] && return
-            cp -n "$f" /c/qemu-pkg/ 2>/dev/null || return
+            cp -n "$f" /c/qemu-pkg/ || { echo "WARN: cannot copy $f"; return; }
             local d src
             for d in $(objdump -p "$f" 2>/dev/null | awk '/DLL Name:/ {print $3}'); do
               src="$dll_dir/$d"
@@ -230,6 +235,7 @@ jobs:
             strip --strip-unneeded /c/qemu-pkg/"$(basename "$exe")" 2>/dev/null || true
             collect /c/qemu-pkg/"$(basename "$exe")"
           done
+          echo "==> collected $(ls /c/qemu-pkg/*.dll 2>/dev/null | wc -l) DLLs"
 
           # Firmware, keymaps, DTB and edk2 descriptors (flat share/ layout)
           cp -rn /c/qemu-install/share/. /c/qemu-pkg/share/
