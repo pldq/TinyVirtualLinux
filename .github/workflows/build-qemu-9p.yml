@@ -18,6 +18,11 @@ on:
         required: false
         default: ""
         type: string
+      minimal_devices:
+        description: "Build with --without-default-devices (smaller/faster, but every device must be passed with -device)"
+        required: false
+        default: false
+        type: boolean
   push:
     tags:
       - "qemu-v*"
@@ -37,6 +42,7 @@ env:
   TARGETS: ${{ github.event.inputs.targets }}
   CONFIGURE_ARGS: ${{ github.event.inputs.configure_args }}
   JOBS: ${{ github.event.inputs.jobs }}
+  MINIMAL_DEVICES: ${{ github.event.inputs.minimal_devices }}
 
 jobs:
   build:
@@ -96,6 +102,7 @@ jobs:
             diffutils
             python
             perl
+            ccache
             mingw-w64-ucrt-x86_64-toolchain
             mingw-w64-ucrt-x86_64-glib2
             mingw-w64-ucrt-x86_64-pixman
@@ -105,13 +112,31 @@ jobs:
             mingw-w64-ucrt-x86_64-ninja
             mingw-w64-ucrt-x86_64-pkgconf
 
+      - name: Restore ccache
+        uses: actions/cache@v4
+        with:
+          path: C:\ccache
+          key: ccache-${{ runner.os }}-${{ github.sha }}
+          restore-keys: |
+            ccache-${{ runner.os }}-
+
       - name: Configure QEMU (virtfs/9P, WHPX, slirp)
         shell: msys2 {0}
+        env:
+          CC: ccache gcc
+          CXX: ccache g++
+          CCACHE_DIR: /c/ccache
+          CCACHE_MAXSIZE: 2G
         run: |
           set -euo pipefail
           src="$(cygpath -u "$GITHUB_WORKSPACE")/qemu"
           targets="${TARGETS:-x86_64-softmmu}"
+          extra=""
+          if [ "${MINIMAL_DEVICES:-false}" = "true" ]; then
+            extra="--without-default-devices"
+          fi
           echo "==> target list: $targets"
+          echo "==> minimal devices: ${MINIMAL_DEVICES:-false}"
           echo "==> extra configure args: ${CONFIGURE_ARGS:-<none>}"
           rm -rf /c/qemu-build
           mkdir -p /c/qemu-build
@@ -126,17 +151,31 @@ jobs:
             --disable-gtk \
             --disable-opengl \
             --disable-virglrenderer \
+            --disable-vnc \
+            --disable-spice \
+            --disable-curses \
+            --disable-xen \
+            --disable-guest-agent \
+            --disable-vhost-net \
+            --disable-vhost-user \
+            --disable-vhost-vdpa \
+            --disable-capstone \
             --disable-modules \
             --disable-docs \
             --disable-plugins \
+            ${extra} \
             ${CONFIGURE_ARGS:-}
 
       - name: Build QEMU
         shell: msys2 {0}
+        env:
+          CCACHE_DIR: /c/ccache
+          CCACHE_MAXSIZE: 2G
         run: |
           set -euo pipefail
           cd /c/qemu-build
           make -j"${JOBS:-$(nproc)}"
+          ccache -s || true
 
       - name: Install and assemble portable package
         shell: msys2 {0}

@@ -65,12 +65,17 @@ make -j"$(nproc)"
 - **手动触发**：Actions → *Build QEMU with virtio-9p for Windows* → *Run workflow*。QEMU 版本固定取自 `.gitmodules` 的 `branch`（当前 `v11.1.3`），无需手动指定；可选参数：
   - `targets`：QEMU target 列表，逗号分隔（默认 `x86_64-softmmu`）；
   - `configure_args`：追加到默认参数之后的额外 `./configure` 选项；
-  - `jobs`：`make -j` 并行度（留空用 CPU 数）。
+  - `jobs`：`make -j` 并行度（留空用 CPU 数）；
+  - `minimal_devices`：启用 `--without-default-devices`，产物更小、构建更快，但所有设备都必须显式 `-device` 指定（默认关闭）。
 - **打 tag 触发**：推送 `qemu-v*` tag 时构建，并自动创建 GitHub Release 附加 zip。
 - 产物：名为 `qemu-9p-windows-x86_64` 的 artifact（zip），保留 30 天。
 
 工作流会浅克隆 `.gitmodules` 指定的 QEMU tag、应用 `patches/*.patch`、用 MSYS2 UCRT64
 构建（WHPX + virtfs + slirp），并打包 `bin/*.exe`、运行时 DLL 与固件。
+
+为缩短构建时间，默认关闭了 VNC、SPICE、Xen、curses、guest-agent、vhost-net/user/vdpa、
+capstone 以及 SDL/GTK/OpenGL/VirGL 等与 9P 场景无关的子系统；同时用 ccache
+（`actions/cache` 持久化）缓存重复构建。
 
 ## 使用
 
