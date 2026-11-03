@@ -187,9 +187,12 @@ jobs:
 
           # --prefix=C:/qemu-install keeps the Windows path intact (a POSIX
           # prefix such as "/" is translated by MSYS2 into the MSYS root).
+          # On Windows QEMU installs the executables and a flat share/ tree
+          # directly under that prefix, which is also what the relocatable
+          # runtime layout (exe_dir/...) expects.
           make install
 
-          if [ ! -d /c/qemu-install/share/qemu ]; then
+          if [ ! -d /c/qemu-install/share ]; then
             echo "ERROR: install prefix was not populated as expected"
             ls -la /c/qemu-install 2>/dev/null || true
             exit 1
@@ -209,20 +212,20 @@ jobs:
             done
           }
 
-          for exe in /c/qemu-install/bin/*.exe; do
+          for exe in /c/qemu-install/*.exe; do
             [ -f "$exe" ] || continue
             cp -n "$exe" /c/qemu-pkg/
+            strip --strip-unneeded /c/qemu-pkg/"$(basename "$exe")" 2>/dev/null || true
             collect /c/qemu-pkg/"$(basename "$exe")"
           done
 
-          # Firmware, keymaps and DTB files, at the layout QEMU relocates to
-          # (exe_dir/share/qemu) at runtime.
-          cp -rn /c/qemu-install/share/qemu /c/qemu-pkg/share/
+          # Firmware, keymaps, DTB and edk2 descriptors (flat share/ layout)
+          cp -rn /c/qemu-install/share/. /c/qemu-pkg/share/
 
           echo "==> package contents"
           ls -la /c/qemu-pkg
           echo "dll count: $(ls /c/qemu-pkg/*.dll 2>/dev/null | wc -l)"
-          test -f /c/qemu-pkg/share/qemu/bios-256k.bin && echo "firmware OK" || echo "WARN: no bios-256k.bin"
+          test -f /c/qemu-pkg/share/bios-256k.bin && echo "firmware OK" || echo "WARN: no bios-256k.bin"
 
       - name: Package ZIP
         shell: pwsh
