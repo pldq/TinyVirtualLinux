@@ -1,0 +1,179 @@
+name: Build QEMU with virtio-9p for Windows
+
+on:
+  workflow_dispatch:
+    inputs:
+      qemu_tag:
+        description: "QEMU release tag to build (leave empty to use the tag pinned in .gitmodules)"
+        required: false
+        type: string
+  push:
+    tags:
+      - "qemu-v*"
+
+permissions:
+  contents: write
+
+concurrency:
+  group: build-qemu-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  QEMU_REPO: https://github.com/qemu/qemu.git
+  STAGE: C:\qemu-stage
+  PKG: C:\qemu-pkg
+  ARTIFACT: qemu-9p-windows-x86_64.zip
+
+jobs:
+  build:
+    runs-on: windows-latest
+    timeout-minutes: 360
+    steps:
+      - name: Configure git line endings
+        shell: pwsh
+        run: |
+          git config --global core.autocrlf false
+          git config --global core.eol lf
+
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          submodules: false
+
+      - name: Resolve QEMU tag and clone source
+        shell: pwsh
+        run: |
+          $tag = '${{ github.event.inputs.qemu_tag }}'.Trim()
+          if (-not $tag) {
+            $match = Select-String -Path .gitmodules -Pattern '^\s*branch\s*=\s*(.+)$'
+            if (-not $match) { throw "no QEMU tag given and no branch entry in .gitmodules" }
+            $tag = $match.Matches[0].Groups[1].Value.Trim()
+          }
+          Write-Host "==> Building QEMU tag: $tag"
+          "QEMU_TAG=$tag" | Out-File -FilePath $env:GITHUB_ENV -Append -Encoding utf8
+
+          if (Test-Path qemu) { Remove-Item qemu -Recurse -Force }
+          git clone --depth 1 --branch $tag $env:QEMU_REPO qemu
+          if ($LASTEXITCODE -ne 0) { throw "failed to clone $env:QEMU_REPO at $tag" }
+          git -C qemu describe --tags --always
+          git -C qemu rev-parse HEAD
+
+      - name: Apply Windows 9P patches
+        shell: pwsh
+        run: |
+          $patches = @(Get-ChildItem patches -Filter *.patch | Sort-Object Name)
+          if ($patches.Count -eq 0) { throw "no *.patch files found under patches/" }
+          foreach ($p in $patches) {
+            Write-Host "==> applying $($p.Name)"
+            git -C qemu apply --whitespace=nowarn --verbose $p.FullName
+            if ($LASTEXITCODE -ne 0) { throw "failed to apply $($p.Name)" }
+          }
+
+      - name: Setup MSYS2 (UCRT64) with build dependencies
+        uses: msys2/setup-msys2@v2
+        with:
+          msystem: UCRT64
+          update: true
+          install: >-
+            base-devel
+            git
+            diffutils
+            python
+            perl
+            mingw-w64-ucrt-x86_64-toolchain
+            mingw-w64-ucrt-x86_64-glib2
+            mingw-w64-ucrt-x86_64-pixman
+            mingw-w64-ucrt-x86_64-libslirp
+            mingw-w64-ucrt-x86_64-zstd
+            mingw-w64-ucrt-x86_64-meson
+            mingw-w64-ucrt-x86_64-ninja
+            mingw-w64-ucrt-x86_64-pkgconf
+
+      - name: Configure QEMU (x86_64-softmmu, virtfs/9P, WHPX, slirp)
+        shell: msys2 {0}
+        run: |
+          set -euo pipefail
+          src="$(cygpath -u "$GITHUB_WORKSPACE")/qemu"
+          rm -rf /c/qemu-build
+          mkdir -p /c/qemu-build
+          cd /c/qemu-build
+          "$src/configure" \
+            --target-list=x86_64-softmmu \
+            --prefix=/ \
+            --enable-virtfs \
+            --enable-whpx \
+            --enable-slirp \
+            --disable-sdl \
+            --disable-gtk \
+            --disable-opengl \
+            --disable-virglrenderer \
+            --disable-modules \
+            --disable-docs \
+            --disable-plugins
+
+      - name: Build QEMU
+        shell: msys2 {0}
+        run: |
+          set -euo pipefail
+          cd /c/qemu-build
+          make -j"$(nproc)"
+          ls -la qemu-system-x86_64.exe
+
+      - name: Install and assemble portable package
+        shell: msys2 {0}
+        run: |
+          set -euo pipefail
+          cd /c/qemu-build
+          rm -rf /c/qemu-stage /c/qemu-pkg
+          make install DESTDIR=/c/qemu-stage
+
+          mkdir -p /c/qemu-pkg/share
+          cp -n /c/qemu-stage/bin/qemu-system-x86_64.exe /c/qemu-pkg/
+
+          # Collect the mingw runtime DLLs transitively (only those under /ucrt64/bin)
+          collect() {
+            local f="$1"
+            local b
+            b="$(basename "$f")"
+            [ -f "/c/qemu-pkg/$b" ] && return
+            cp -n "$f" /c/qemu-pkg/ 2>/dev/null || return
+            for d in $(ldd "$f" 2>/dev/null \
+                       | grep -iE '/ucrt64/bin/[^ ]+\.dll' \
+                       | sed -E 's#.*(/ucrt64/bin/[^ ]+\.dll).*#\1#'); do
+              collect "$d"
+            done
+          }
+          collect /c/qemu-pkg/qemu-system-x86_64.exe
+
+          # Firmware and keymaps installed by `make install`
+          cp -rn /c/qemu-stage/share/qemu/. /c/qemu-pkg/share/
+
+          echo "==> package contents"
+          ls -la /c/qemu-pkg
+          echo "dll count: $(ls /c/qemu-pkg/*.dll 2>/dev/null | wc -l)"
+          test -f /c/qemu-pkg/share/bios-256k.bin && echo "firmware OK" || echo "WARN: no bios-256k.bin"
+
+      - name: Package ZIP
+        shell: pwsh
+        run: |
+          $out = Join-Path $env:RUNNER_TEMP $env:ARTIFACT
+          if (Test-Path $out) { Remove-Item $out -Force }
+          Compress-Archive -Path "$env:PKG\*" -DestinationPath $out -Force
+          $size = (Get-Item $out).Length
+          Write-Host "==> created $out ($([math]::Round($size/1MB,1)) MB)"
+          "ZIP_PATH=$out" | Out-File -FilePath $env:GITHUB_ENV -Append -Encoding utf8
+
+      - name: Upload build artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: qemu-9p-windows-x86_64
+          path: ${{ runner.temp }}/${{ env.ARTIFACT }}
+          if-no-files-found: error
+          retention-days: 30
+
+      - name: Publish release (on qemu-v* tag)
+        if: startsWith(github.ref, 'refs/tags/')
+        uses: softprops/action-gh-release@v2
+        with:
+          files: ${{ runner.temp }}/${{ env.ARTIFACT }}
+          generate_release_notes: true
