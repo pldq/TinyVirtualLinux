@@ -74,9 +74,10 @@ make -j"$(nproc)"
 工作流会浅克隆 `.gitmodules` 指定的 QEMU tag、应用 `patches/*.patch`、用 MSYS2 UCRT64
 构建（WHPX + virtfs + slirp），并打包 `*.exe`、运行时 DLL 与固件。
 
-默认构建不做额外裁剪，只显式启用 `virtfs`、WHPX 和 slirp，其余特性交给 QEMU 的
-auto 检测；需要更快/更小的产物时勾选 `minimal`。同时用 ccache（`actions/cache`
-持久化）缓存重复构建。
+默认构建显式启用 `virtfs`、WHPX、slirp，以及 SDL/GTK/OpenGL 图形后端（Windows 上的
+原生窗口显示），其余特性交给 QEMU 的 auto 检测；产物同时带上 GTK 运行所需的图标、
+主题、GSettings schema 与 gdk-pixbuf loaders。需要更快/更小的产物时勾选 `minimal`
+（会关闭这些图形后端与默认设备）。同时用 ccache（`actions/cache` 持久化）缓存重复构建。
 
 ## 使用
 

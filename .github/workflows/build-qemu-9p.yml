@@ -108,6 +108,8 @@ jobs:
             ccache
             mingw-w64-ucrt-x86_64-toolchain
             mingw-w64-ucrt-x86_64-glib2
+            mingw-w64-ucrt-x86_64-gtk3
+            mingw-w64-ucrt-x86_64-SDL2
             mingw-w64-ucrt-x86_64-pixman
             mingw-w64-ucrt-x86_64-libslirp
             mingw-w64-ucrt-x86_64-zstd
@@ -168,6 +170,9 @@ jobs:
             --enable-virtfs \
             --enable-whpx \
             --enable-slirp \
+            --enable-sdl \
+            --enable-gtk \
+            --enable-opengl \
             "${extra[@]}" \
             ${CONFIGURE_ARGS:-}
 
@@ -247,6 +252,25 @@ jobs:
 
           # Firmware, keymaps, DTB and edk2 descriptors (flat share/ layout)
           cp -rn /c/qemu-install/share/. /c/qemu-pkg/share/
+
+          # GTK runtime assets for the native Windows display (icons, themes,
+          # GSettings schemas, gdk-pixbuf loaders). Best effort: minimal builds
+          # without GTK simply skip them.
+          if [ -d /ucrt64/share/icons ]; then
+            cp -rn /ucrt64/share/icons /c/qemu-pkg/share/
+          fi
+          if [ -d /ucrt64/share/themes ]; then
+            cp -rn /ucrt64/share/themes /c/qemu-pkg/share/
+          fi
+          if [ -d /ucrt64/share/glib-2.0/schemas ]; then
+            mkdir -p /c/qemu-pkg/share/glib-2.0
+            cp -rn /ucrt64/share/glib-2.0/schemas /c/qemu-pkg/share/glib-2.0/
+            glib-compile-schemas /c/qemu-pkg/share/glib-2.0/schemas || true
+          fi
+          if [ -d /ucrt64/lib/gdk-pixbuf-2.0 ]; then
+            mkdir -p /c/qemu-pkg/lib
+            cp -rn /ucrt64/lib/gdk-pixbuf-2.0 /c/qemu-pkg/lib/
+          fi
 
           # Fail early if any mingw-provided dependency is still missing.
           missing=0
