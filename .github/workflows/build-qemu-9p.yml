@@ -238,10 +238,13 @@ jobs:
           "ZIP_PATH=$out" | Out-File -FilePath $env:GITHUB_ENV -Append -Encoding utf8
 
       - name: Upload build artifact
+        # Artifacts are always delivered as a zip, so upload the package
+        # directory itself: extracting the download then yields the flat
+        # layout (exe + share/) instead of a zip inside a zip.
         uses: actions/upload-artifact@v4
         with:
           name: qemu-9p-windows-x86_64
-          path: ${{ runner.temp }}/${{ env.ARTIFACT }}
+          path: ${{ env.PKG }}
           if-no-files-found: error
           retention-days: 30
 
