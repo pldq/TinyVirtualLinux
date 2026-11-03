@@ -68,7 +68,7 @@ make -j"$(nproc)"
   - `jobs`：`make -j` 并行度（留空用 CPU 数）；
   - `minimal`：最小化构建，会加上 `--without-default-devices`，并关闭 VNC/SPICE/curses/Xen/guest-agent/vhost-*/capstone 以及 SDL/GTK/OpenGL/VirGL 等可选子系统（默认关闭，即由 QEMU 按环境自动检测）。
 - **打 tag 触发**：推送 `qemu-v*` tag 时构建，并创建/更新该 tag 的 GitHub Release，附带 zip。
-- **发布**：构建成功后都会发布 Release——手动触发的产物更新到滚动的 `qemu-9p-latest` Release（zip 覆盖），tag 触发则更新对应 tag 的 Release。
+- **发布**：构建成功后都会发布 Release。手动触发的 Release 名称取自 `.gitmodules` 的 QEMU tag 并带构建变体，例如 `qemu-v11.1.3-9p`（默认）或 `qemu-v11.1.3-9p-minimal`（minimal）；tag 触发则更新对应 tag 的 Release。Release 说明包含 QEMU tag/commit、构建变体、target 列表和 workflow run 链接。
 - 产物：名为 `qemu-9p-windows-x86_64` 的 artifact（zip，保留 30 天）以及 Release 附件 `qemu-9p-windows-x86_64.zip`。
 
 工作流会浅克隆 `.gitmodules` 指定的 QEMU tag、应用 `patches/*.patch`、用 MSYS2 UCRT64

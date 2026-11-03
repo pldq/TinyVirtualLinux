@@ -61,6 +61,7 @@ jobs:
           submodules: false
 
       - name: Clone QEMU at the tag pinned in .gitmodules
+        id: qemu
         shell: pwsh
         run: |
           $match = Select-String -Path .gitmodules -Pattern '^\s*branch\s*=\s*(.+)$'
@@ -73,6 +74,8 @@ jobs:
           if ($LASTEXITCODE -ne 0) { throw "failed to clone $env:QEMU_REPO at $tag" }
           $head = (git -C qemu rev-parse HEAD).Trim()
           Write-Host "==> HEAD: $head ($(git -C qemu describe --tags --always))"
+          "tag=$tag" | Out-File -FilePath $env:GITHUB_OUTPUT -Append -Encoding utf8
+          "commit=$head" | Out-File -FilePath $env:GITHUB_OUTPUT -Append -Encoding utf8
 
           # The gitlink recorded in the outer repo should match the tag commit.
           $gitlink = ((git ls-tree HEAD qemu) -split '\s+')[2]
@@ -288,16 +291,21 @@ jobs:
           retention-days: 30
 
       - name: Publish release
-        # Tag pushes create/update the release for that tag; a manual run
-        # keeps a single rolling "qemu-9p-latest" release whose zip is
-        # replaced on every successful build.
+        # Tag pushes create/update the release for that tag. A manual run
+        # publishes a release named after the QEMU submodule tag plus the
+        # build variant, e.g. "qemu-v11.1.3-9p-minimal".
         if: github.event_name == 'workflow_dispatch' || startsWith(github.ref, 'refs/tags/')
         uses: softprops/action-gh-release@v2
         with:
-          tag_name: "${{ startsWith(github.ref, 'refs/tags/') && github.ref_name || 'qemu-9p-latest' }}"
-          name: "${{ startsWith(github.ref, 'refs/tags/') && github.ref_name || 'QEMU 9P for Windows (latest)' }}"
+          tag_name: "${{ startsWith(github.ref, 'refs/tags/') && github.ref_name || format('qemu-{0}-9p{1}', steps.qemu.outputs.tag, env.MINIMAL == 'true' && '-minimal' || '') }}"
+          name: "${{ startsWith(github.ref, 'refs/tags/') && github.ref_name || format('QEMU {0} 9P for Windows{1}', steps.qemu.outputs.tag, env.MINIMAL == 'true' && ' (minimal)' || '') }}"
+          body: |
+            QEMU submodule tag: `${{ steps.qemu.outputs.tag }}`
+            QEMU commit: `${{ steps.qemu.outputs.commit }}`
+            Build variant: ${{ env.MINIMAL == 'true' && 'minimal (no VNC/SDL/SPICE/vhost, no default devices)' || 'default' }}
+            Target list: `${{ env.TARGETS || 'x86_64-softmmu' }}`
+            Workflow run: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
           target_commitish: ${{ github.sha }}
           files: ${{ runner.temp }}/${{ env.ARTIFACT }}
           overwrite_files: true
           fail_on_unmatched_files: true
-          generate_release_notes: true
