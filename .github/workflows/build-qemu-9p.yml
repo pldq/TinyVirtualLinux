@@ -18,8 +18,8 @@ on:
         required: false
         default: ""
         type: string
-      minimal_devices:
-        description: "Build with --without-default-devices (smaller/faster, but every device must be passed with -device)"
+      minimal:
+        description: "Minimal build: only virtio-9p/WHPX/slirp, no VNC/SDL/SPICE/vhost and no default devices (every device must be passed with -device)"
         required: false
         default: false
         type: boolean
@@ -42,7 +42,7 @@ env:
   TARGETS: ${{ github.event.inputs.targets }}
   CONFIGURE_ARGS: ${{ github.event.inputs.configure_args }}
   JOBS: ${{ github.event.inputs.jobs }}
-  MINIMAL_DEVICES: ${{ github.event.inputs.minimal_devices }}
+  MINIMAL: ${{ github.event.inputs.minimal }}
 
 jobs:
   build:
@@ -131,12 +131,30 @@ jobs:
           set -euo pipefail
           src="$(cygpath -u "$GITHUB_WORKSPACE")/qemu"
           targets="${TARGETS:-x86_64-softmmu}"
-          extra=""
-          if [ "${MINIMAL_DEVICES:-false}" = "true" ]; then
-            extra="--without-default-devices"
+          extra=()
+          if [ "${MINIMAL:-false}" = "true" ]; then
+            echo "==> minimal build: disabling optional subsystems and default devices"
+            extra+=(
+              --without-default-devices
+              --disable-sdl
+              --disable-gtk
+              --disable-opengl
+              --disable-virglrenderer
+              --disable-vnc
+              --disable-spice
+              --disable-curses
+              --disable-xen
+              --disable-guest-agent
+              --disable-vhost-net
+              --disable-vhost-user
+              --disable-vhost-vdpa
+              --disable-capstone
+              --disable-modules
+              --disable-docs
+              --disable-plugins
+            )
           fi
           echo "==> target list: $targets"
-          echo "==> minimal devices: ${MINIMAL_DEVICES:-false}"
           echo "==> extra configure args: ${CONFIGURE_ARGS:-<none>}"
           rm -rf /c/qemu-build
           mkdir -p /c/qemu-build
@@ -147,23 +165,7 @@ jobs:
             --enable-virtfs \
             --enable-whpx \
             --enable-slirp \
-            --disable-sdl \
-            --disable-gtk \
-            --disable-opengl \
-            --disable-virglrenderer \
-            --disable-vnc \
-            --disable-spice \
-            --disable-curses \
-            --disable-xen \
-            --disable-guest-agent \
-            --disable-vhost-net \
-            --disable-vhost-user \
-            --disable-vhost-vdpa \
-            --disable-capstone \
-            --disable-modules \
-            --disable-docs \
-            --disable-plugins \
-            ${extra} \
+            "${extra[@]}" \
             ${CONFIGURE_ARGS:-}
 
       - name: Build QEMU
