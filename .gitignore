@@ -1,0 +1,25 @@
+# Build output
+/bin/
+/tools/
+/data/
+
+# Go local caches (kept inside the workspace for sandboxed builds)
+/.cache/
+
+# Frontend
+/node_modules/
+/web/node_modules/
+/web/dist/
+
+# Embedded frontend build output: keep the directory placeholder only
+/internal/webui/dist/*
+!/internal/webui/dist/.gitkeep
+
+# Logs and local environment
+*.log
+.env
+.env.*
+!.env.example
+
+node_modules
+.pnpm-store
